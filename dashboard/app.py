@@ -17,14 +17,13 @@ from sklearn.metrics import roc_curve
 
 # ---- Paths (relative to this file) ----
 HERE = Path(__file__).resolve().parent
-ROOT = HERE.parent
 MODELS_DIR = HERE / "models"
-DATA_DIR = ROOT / "data" / "processed"
+DATA_DIR = HERE / "data"
 
 LOGIT_DICT_PATH = MODELS_DIR / "logit_dict.joblib"
 RF_DICT_PATH = MODELS_DIR / "rf_dict.joblib"
 DATA_PATH = DATA_DIR / "credit_applicants.parquet"
-MACRO_PATH = HERE / "data" / "macro_data.parquet"
+MACRO_PATH = DATA_DIR / "macro_data.parquet"
 
 
 # ---- Page config ----
