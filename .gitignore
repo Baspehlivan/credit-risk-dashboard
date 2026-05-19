@@ -44,3 +44,4 @@ Thumbs.db
 # Reports
 reports/*.pdf
 reports/*.html
+.pytest_cache/
