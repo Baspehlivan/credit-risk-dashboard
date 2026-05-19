@@ -24,11 +24,8 @@ import seaborn as sns
 import statsmodels.api as sm
 import joblib
 
-from data.fetch_german_data import build_dataset
 from model.credit_scoring_model import (
     _prepare_data,
-    train_logistic,
-    train_random_forest,
     MODELS_DIR,
     PROCESSED_DIR,
 )
@@ -66,34 +63,31 @@ st.markdown(
 )
 
 
-# ---- Cache data loading ----
-@st.cache_data(ttl=3600)
-def load_or_build_data():
-    """Load the credit dataset (builds it on first run)."""
-    data_path = PROCESSED_DIR / "credit_applicants.parquet"
-    macro_path = PROCESSED_DIR / "macro_data.parquet"
-    if not data_path.exists():
-        with st.spinner("Building credit applicant dataset (first run only)..."):
-            build_dataset(n_applicants=5000)
-    df = pd.read_parquet(data_path)
-    macro = None
-    if macro_path.exists():
-        macro = pd.read_parquet(macro_path)
-    return df, macro
+# ---- Load pre-trained artifacts (instant startup) ----
+LOGIT_DICT_PATH = MODELS_DIR / "logit_dict.joblib"
+RF_DICT_PATH = MODELS_DIR / "rf_dict.joblib"
+DATA_PATH = PROCESSED_DIR / "credit_applicants.parquet"
+MACRO_PATH = PROCESSED_DIR / "macro_data.parquet"
 
 
-@st.cache_resource(ttl=3600)
-def train_models_cached(df):
-    """Train models and cache them."""
-    with st.spinner("Training econometric models..."):
-        logit = train_logistic(df, seed=42)
-        rf = train_random_forest(df, seed=42)
+@st.cache_resource
+def load_models():
+    logit = joblib.load(LOGIT_DICT_PATH)
+    rf = joblib.load(RF_DICT_PATH)
     return logit, rf
 
 
-# ---- Load data ----
-df, macro = load_or_build_data()
-logit, rf = train_models_cached(df)
+@st.cache_data
+def load_data():
+    df = pd.read_parquet(DATA_PATH)
+    macro = None
+    if MACRO_PATH.exists():
+        macro = pd.read_parquet(MACRO_PATH)
+    return df, macro
+
+
+df, macro = load_data()
+logit, rf = load_models()
 
 # =====================================================================
 # HEADER
@@ -152,22 +146,24 @@ with col2:
     )
 
 # --- Build applicant feature vector ---
-applicant = pd.DataFrame([
-    {
-        "age": age,
-        "employment_status": emp_map[employment],
-        "monthly_income": monthly_income,
-        "dti_ratio": dti,
-        "credit_history_years": credit_history,
-        "past_defaults": past_defaults,
-        "marital_status": marital_map[marital],
-        "home_ownership": housing_map[housing],
-        "dependents": 0,
-        "loan_purpose": purpose_map[purpose],
-        "loan_amount": loan_amount,
-        "loan_term_months": loan_term,
-    }
-])
+applicant = pd.DataFrame(
+    [
+        {
+            "age": age,
+            "employment_status": emp_map[employment],
+            "monthly_income": monthly_income,
+            "dti_ratio": dti,
+            "credit_history_years": credit_history,
+            "past_defaults": past_defaults,
+            "marital_status": marital_map[marital],
+            "home_ownership": housing_map[housing],
+            "dependents": 0,
+            "loan_purpose": purpose_map[purpose],
+            "loan_amount": loan_amount,
+            "loan_term_months": loan_term,
+        }
+    ]
+)
 
 # Compute features
 X_app = _prepare_data(applicant)
@@ -225,13 +221,15 @@ with res_col4:
 # =====================================================================
 st.markdown("## Model Performance")
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
-    "Metrics Comparison",
-    "ROC Curve",
-    "Coefficients",
-    "Feature Importance",
-    "Confusion Matrix",
-])
+tab1, tab2, tab3, tab4, tab5 = st.tabs(
+    [
+        "Metrics Comparison",
+        "ROC Curve",
+        "Coefficients",
+        "Feature Importance",
+        "Confusion Matrix",
+    ]
+)
 
 with tab1:
     col_m1, col_m2, col_m3 = st.columns(3)
