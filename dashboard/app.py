@@ -24,7 +24,7 @@ DATA_DIR = ROOT / "data" / "processed"
 LOGIT_DICT_PATH = MODELS_DIR / "logit_dict.joblib"
 RF_DICT_PATH = MODELS_DIR / "rf_dict.joblib"
 DATA_PATH = DATA_DIR / "credit_applicants.parquet"
-MACRO_PATH = DATA_DIR / "macro_data.parquet"
+MACRO_PATH = HERE / "data" / "macro_data.parquet"
 
 
 # ---- Page config ----
