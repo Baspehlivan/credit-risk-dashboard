@@ -1,16 +1,9 @@
 """Streamlit dashboard: German Credit Risk Scoring with Econometric Methodology.
-
-Interactive tool to demonstrate applied econometrics for job applications.
+Self-contained — loads pre-trained artifacts only. No model training at startup.
 """
 
-import sys
-from pathlib import Path
-
-# Ensure project root is on path
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
-
 import warnings
+from pathlib import Path
 
 warnings.filterwarnings("ignore")
 
@@ -19,26 +12,30 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
-import matplotlib.pyplot as plt
-import seaborn as sns
-import statsmodels.api as sm
 import joblib
+from sklearn.metrics import roc_curve
 
-from model.credit_scoring_model import (
-    _prepare_data,
-    MODELS_DIR,
-    PROCESSED_DIR,
-)
+# ---- Paths (relative to this file) ----
+HERE = Path(__file__).resolve().parent
+ROOT = HERE.parent
+MODELS_DIR = HERE / "models"
+DATA_DIR = ROOT / "data" / "processed"
+
+LOGIT_DICT_PATH = MODELS_DIR / "logit_dict.joblib"
+RF_DICT_PATH = MODELS_DIR / "rf_dict.joblib"
+DATA_PATH = DATA_DIR / "credit_applicants.parquet"
+MACRO_PATH = DATA_DIR / "macro_data.parquet"
+
 
 # ---- Page config ----
 st.set_page_config(
     page_title="German Credit Risk Dashboard",
-    page_icon="🏦",
+    page_icon=":bank:",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-# ---- Custom CSS for professional look ----
+# ---- Custom CSS ----
 st.markdown(
     """
 <style>
@@ -51,12 +48,7 @@ st.markdown(
     .risk-low { color: #28a745; font-weight: 700; }
     .risk-moderate { color: #ffc107; font-weight: 700; }
     .risk-high { color: #dc3545; font-weight: 700; }
-    .header-container {
-        text-align: center;
-        padding: 1rem 0;
-        border-bottom: 2px solid #e0e0e0;
-        margin-bottom: 2rem;
-    }
+    .header-container { text-align: center; padding: 1rem 0; border-bottom: 2px solid #e0e0e0; margin-bottom: 2rem; }
 </style>
 """,
     unsafe_allow_html=True,
@@ -64,10 +56,6 @@ st.markdown(
 
 
 # ---- Load pre-trained artifacts (instant startup) ----
-LOGIT_DICT_PATH = MODELS_DIR / "logit_dict.joblib"
-RF_DICT_PATH = MODELS_DIR / "rf_dict.joblib"
-DATA_PATH = PROCESSED_DIR / "credit_applicants.parquet"
-MACRO_PATH = PROCESSED_DIR / "macro_data.parquet"
 
 
 @st.cache_resource
@@ -89,28 +77,71 @@ def load_data():
 df, macro = load_data()
 logit, rf = load_models()
 
+# ---- Feature engineering (replicates _prepare_data inline) ----
+
+FEATURES = [
+    "age",
+    "employment_status",
+    "monthly_income",
+    "dti_ratio",
+    "credit_history_years",
+    "past_defaults",
+    "marital_status",
+    "home_ownership",
+    "dependents",
+    "loan_purpose",
+    "loan_amount",
+    "loan_term_months",
+]
+
+
+def prepare_data(df_input, with_macro=False):
+    """Create feature matrix matching training format."""
+    X = df_input[FEATURES].copy()
+    for col in [
+        "employment_status",
+        "marital_status",
+        "home_ownership",
+        "loan_purpose",
+    ]:
+        dummies = pd.get_dummies(X[col], prefix=col, drop_first=True).astype(float)
+        X = pd.concat([X.drop(columns=[col]), dummies], axis=1)
+    X["log_income"] = np.log(X["monthly_income"].clip(lower=1))
+    X["log_loan_amount"] = np.log(X["loan_amount"].clip(lower=1))
+    X["loan_to_income"] = X["loan_amount"] / X["monthly_income"].clip(lower=1)
+    X["loan_to_income"] = X["loan_to_income"].clip(upper=10)
+    X = X.drop(columns=["monthly_income", "loan_amount"])
+    if with_macro and "_macro_unemp" in df_input.columns:
+        X["macro_unemp"] = df_input["_macro_unemp"].fillna(
+            df_input["_macro_unemp"].median()
+        )
+        X["macro_short_rate"] = df_input["_macro_short_rate"].fillna(
+            df_input["_macro_short_rate"].median()
+        )
+    return X
+
+
 # =====================================================================
 # HEADER
 # =====================================================================
 st.markdown(
-    '<div class="header-container">'
-    '<div class="main-header">German Credit Risk Scoring</div>'
-    '<div class="sub-header">Applied Econometrics for Consumer Lending</div>'
+    f'<div class="header-container">'
+    f'<div class="main-header">German Credit Risk Scoring</div>'
+    f'<div class="sub-header">Applied Econometrics for Consumer Lending</div>'
     f'<p style="margin-top:0.5rem;color:#888;">Dataset: {len(df):,} loan applicants | '
     f"Default rate: {df['default'].mean():.1%} | "
     f"Period: {df['application_date'].min().year}–{df['application_date'].max().year}</p>"
-    "</div>",
+    f"</div>",
     unsafe_allow_html=True,
 )
 
 # =====================================================================
-# ASSESS YOUR CREDIT SCORE — Interactive tool
+# INTERACTIVE CREDIT SCORE SIMULATOR
 # =====================================================================
 st.markdown("## Assess Your Credit Score")
 st.markdown(
-    "Use this interactive tool to see how borrower characteristics affect credit risk. "
-    "Adjust the sliders and observe how the estimated **Probability of Default (PD)** changes "
-    "based on the econometric model."
+    "Adjust the sliders and observe how borrower characteristics affect the estimated "
+    "**Probability of Default (PD)** based on the econometric model."
 )
 
 col1, col2 = st.columns(2)
@@ -145,7 +176,7 @@ with col2:
         index=4,
     )
 
-# --- Build applicant feature vector ---
+# Build applicant vector
 applicant = pd.DataFrame(
     [
         {
@@ -165,11 +196,12 @@ applicant = pd.DataFrame(
     ]
 )
 
-# Compute features
-X_app = _prepare_data(applicant)
-X_app_sm = sm.add_constant(X_app.astype(float), has_constant="add")
+X_app = prepare_data(applicant)
+# Add constant column
+X_app_sm = X_app.copy()
+X_app_sm.insert(0, "const", 1.0)
 
-# Ensure all columns match training set
+# Align columns with training set
 for col in logit["X_train"].columns:
     if col not in X_app_sm.columns:
         X_app_sm[col] = 0.0
@@ -178,19 +210,16 @@ X_app_sm = X_app_sm[logit["X_train"].columns]
 prob = logit["model"].predict(X_app_sm)[0]
 score = int((1 - prob) * 1000)
 
-# --- Display result ---
+# Result cards
 st.markdown("---")
 res_col1, res_col2, res_col3, res_col4 = st.columns(4)
 
 if prob < 0.10:
-    risk_class = "Low Risk"
-    risk_color = "risk-low"
+    risk_class, risk_color = "Low Risk", "risk-low"
 elif prob < 0.25:
-    risk_class = "Moderate Risk"
-    risk_color = "risk-moderate"
+    risk_class, risk_color = "Moderate Risk", "risk-moderate"
 else:
-    risk_class = "High Risk"
-    risk_color = "risk-high"
+    risk_class, risk_color = "High Risk", "risk-high"
 
 with res_col1:
     st.markdown(
@@ -208,7 +237,6 @@ with res_col3:
         unsafe_allow_html=True,
     )
 with res_col4:
-    # Factor that contributed the most
     contrib = logit["model"].params.drop("const") * X_app_sm.values[0][1:]
     top_feat = contrib.abs().idxmax()
     st.markdown(
@@ -243,13 +271,11 @@ with tab1:
                 st.metric(k.replace("_", " ").title(), f"{m[k]:.3f}")
     with col_m3:
         st.markdown("**Logit Model Fit**")
-        st.metric("Pseudo R²", f"{logit['metrics']['prsquared']:.4f}")
+        st.metric("Pseudo R", f"{logit['metrics']['prsquared']:.4f}")
         st.metric("AIC", f"{logit['metrics']['aic']:.0f}")
         st.metric("BIC", f"{logit['metrics']['bic']:.0f}")
 
 with tab2:
-    from sklearn.metrics import roc_curve
-
     fig_roc = go.Figure()
     for name, res in [("Logistic", logit), ("Random Forest", rf)]:
         fpr, tpr, _ = roc_curve(res["y_test"], res["y_prob"])
@@ -287,15 +313,12 @@ with tab3:
             "***" if p < 0.01 else ("**" if p < 0.05 else ("*" if p < 0.1 else ""))
         )
     )
-    # Color code
     styled = summary.style.background_gradient(
         subset=["Coef."], cmap="RdBu_r", vmin=-1, vmax=1
     )
     st.dataframe(styled, use_container_width=True)
-
     st.caption(
-        "*** p<0.01, ** p<0.05, * p<0.1. Positive coefficients increase default probability. "
-        "Negative coefficients reduce it."
+        "*** p<0.01, ** p<0.05, * p<0.1. Positive coefficients increase default probability."
     )
 
 with tab4:
@@ -305,7 +328,7 @@ with tab4:
         x="importance",
         y="feature",
         orientation="h",
-        title="Random Forest — Top 15 Feature Importances",
+        title="Random Forest - Top 15 Feature Importances",
         color="importance",
         color_continuous_scale="Blues",
     )
@@ -322,7 +345,7 @@ with tab5:
         y=["Actual: No Default", "Actual: Default"],
         text_auto=True,
         color_continuous_scale="Blues",
-        title="Confusion Matrix — Logistic Regression",
+        title="Confusion Matrix - Logistic Regression",
     )
     fig_cm.update_layout(width=500, height=400)
     st.plotly_chart(fig_cm, use_container_width=True)
@@ -335,8 +358,9 @@ st.markdown("## Data Exploration")
 tab_d1, tab_d2, tab_d3 = st.tabs(["Default Drivers", "Macro Context", "Distribution"])
 
 with tab_d1:
-    st.markdown("**What drives default?** Marginal effects from the logit model.")
-    # Calculate AME
+    st.markdown(
+        "**What drives default?** Average Marginal Effects (AME) from the logit model."
+    )
     fitted = logit["model"].predict(logit["X_train"])
     ame_factor = (fitted * (1 - fitted)).mean()
     ame_data = []
@@ -353,7 +377,7 @@ with tab_d1:
         x="AME",
         y="Variable",
         orientation="h",
-        title="Average Marginal Effects — Top 12",
+        title="Average Marginal Effects - Top 12",
         color="AME",
         color_continuous_scale="RdBu_r",
     )
@@ -378,7 +402,7 @@ with tab_d2:
         st.plotly_chart(fig_macro, use_container_width=True)
     else:
         st.info(
-            "Macro data not available for this session. Run with internet access to fetch ECB/Bundesbank data."
+            "Macro data not available. Run locally with internet access to fetch ECB/Bundesbank data."
         )
 
 with tab_d3:
@@ -410,60 +434,31 @@ st.markdown(
     """
 <div class="methodology">
 <h4>Model: Binary Logistic Regression</h4>
-<p>
-The core model is a <strong>logistic regression</strong> estimated via maximum likelihood (MLE):
-</p>
-<p style="text-align:center;font-style:italic;">
-P(Y=1 | X) = 1 / (1 + exp(-Xβ))
-</p>
-<p>where Y=1 indicates loan default and X includes borrower characteristics (age, income, DTI, past defaults, employment status, housing, loan purpose) and macroeconomic conditions (unemployment, interest rates).</p>
+<p>The core model is a <strong>logistic regression</strong> estimated via maximum likelihood (MLE):</p>
+<p style="text-align:center;font-style:italic;">P(Y=1 | X) = 1 / (1 + exp(-Xβ))</p>
+<p>where Y=1 indicates loan default and X includes borrower characteristics (age, income, DTI, past defaults, employment status, housing, loan purpose) and macroeconomic conditions.</p>
 
 <h4>Inference & Diagnostics</h4>
 <ul>
-<li><strong>Statistical significance:</strong> Coefficients tested with z-tests; p-values, standard errors, and confidence intervals reported.</li>
-<li><strong>Model fit:</strong> McFadden Pseudo R², log-likelihood, AIC, BIC for model selection.</li>
-<li><strong>Average Marginal Effects (AME):</strong> Interpreted as the average change in default probability per unit change in each predictor.</li>
-<li><strong>ROC-AUC:</strong> 0.5 (random) to 1.0 (perfect) — measures discriminatory power.</li>
+<li><strong>Statistical significance:</strong> Coefficients tested with z-tests; p-values, standard errors reported.</li>
+<li><strong>Model fit:</strong> McFadden Pseudo R, log-likelihood, AIC, BIC for model selection.</li>
+<li><strong>Average Marginal Effects (AME):</strong> Change in default probability per unit change in each predictor.</li>
+<li><strong>ROC-AUC:</strong> Measures discriminatory power (0.5 = random, 1.0 = perfect).</li>
 </ul>
 
 <h4>Why logistic regression over ML?</h4>
-<p>In credit risk, regulators (BaFin, EBA) and internal audit require <strong>interpretable, transparent models</strong> where each coefficient has a clear economic meaning. A black-box model (XGBoost, neural net) with higher AUC is often rejected in favour of an explainable GLM. That said, a Random Forest is included as a benchmark to show I can also work with non-linear ML methods.</p>
+<p>In credit risk, regulators (BaFin, EBA) require <strong>interpretable, transparent models</strong>. A Random Forest is also included as a non-linear benchmark to demonstrate ML capability.</p>
 
 <h4>Data</h4>
-<p>The applicant dataset uses realistic distributions calibrated to the German credit market (Schufa-style). Macroeconomic context is drawn from <strong>ECB Statistical Data Warehouse</strong> and Bundesbank public APIs. Code and methodology are fully reproducible.</p>
+<p>Applicant data calibrated to the German credit market (Schufa-style). Macroeconomic context from <strong>ECB Statistical Data Warehouse</strong> and Bundesbank public APIs. Fully reproducible.</p>
 </div>
 """,
     unsafe_allow_html=True,
 )
 
 # =====================================================================
-# TECHNICAL DETAILS & REPRODUCIBILITY
+# SIDEBAR
 # =====================================================================
-st.markdown("## Reproducibility")
-st.code(
-    """
-# Clone the repository
-git clone https://github.com/pehlivan-dagli/credit-risk-dashboard
-cd credit-risk-dashboard
-
-# Install dependencies (uv recommended)
-pip install -r requirements.txt
-
-# Run the pipeline (fetch data + train models)
-python -m model.credit_scoring_model
-
-# Launch the dashboard
-streamlit run dashboard/app.py
-""",
-    language="bash",
-)
-
-st.markdown(
-    "**Tech stack:** Python, statsmodels, scikit-learn, Streamlit, Plotly, "
-    "pandas, numpy, pandas-datareader, joblib."
-)
-
-# Sidebar
 with st.sidebar:
     st.markdown("## About")
     st.markdown(
