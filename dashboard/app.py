@@ -322,8 +322,8 @@ with tab3:
             "***" if p < 0.01 else ("**" if p < 0.05 else ("*" if p < 0.1 else ""))
         )
     )
-    styled = summary.style.background_gradient(
-        subset=["Coef."], cmap="RdBu_r", vmin=-1, vmax=1
+    styled = summary.style.format(
+        "{:.4f}", subset=["Coef.", "Std.Err.", "z", "P>|z|", "[0.025", "0.975]"]
     )
     st.dataframe(styled, use_container_width=True)
     st.caption(
