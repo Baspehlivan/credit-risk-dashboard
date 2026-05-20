@@ -6,12 +6,14 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-import numpy as np
-import pandas as pd
 import pytest
 
-from model.credit_scoring_model import _prepare_data, train_logistic, PROCESSED_DIR
 from data.fetch_german_data import generate_credit_applicants
+from model.credit_scoring_model import (
+    _prepare_data,
+    cross_validate_models,
+    train_logistic,
+)
 
 
 @pytest.fixture(scope="module")
@@ -83,6 +85,26 @@ def test_categorical_dummies_created(sample_data):
         ))
     ]
     assert len(dummy_cols) > 0, "No dummy variables created"
+
+
+def test_cross_validate_models(sample_data):
+    cv_results = cross_validate_models(sample_data, n_splits=3, seed=42)
+
+    assert "logistic" in cv_results
+    assert "random_forest" in cv_results
+    assert cv_results["n_splits"] == 3
+
+    for model_name in ["logistic", "random_forest"]:
+        for metric in ["accuracy", "precision", "recall", "f1", "roc_auc"]:
+            assert metric in cv_results[model_name], f"Missing metric {metric} for {model_name}"
+            mean = cv_results[model_name][metric]["mean"]
+            std = cv_results[model_name][metric]["std"]
+            assert 0.0 <= mean <= 1.0, f"{model_name} {metric} mean={mean} out of bounds"
+            assert std >= 0.0, f"{model_name} {metric} std={std} is negative"
+
+    # AUC should be above random (0.5) for both models
+    assert cv_results["logistic"]["roc_auc"]["mean"] > 0.5
+    assert cv_results["random_forest"]["roc_auc"]["mean"] > 0.5
 
 
 if __name__ == "__main__":

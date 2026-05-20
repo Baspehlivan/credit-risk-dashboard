@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Re-save logit_dict without statsmodels objects — pure Python/numpy only."""
 import joblib
-import numpy as np
 
 old = joblib.load("dashboard/models/logit_dict.joblib")
 

@@ -13,8 +13,9 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 import argparse
+
 from data.fetch_german_data import build_dataset
-from model.credit_scoring_model import run_pipeline, PROCESSED_DIR, MODELS_DIR
+from model.credit_scoring_model import MODELS_DIR, PROCESSED_DIR, run_pipeline
 
 
 def main():

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Push repo to HF Space with proper exclude patterns."""
-import subprocess, sys
+import subprocess
+import sys
 
 result = subprocess.run(
     [

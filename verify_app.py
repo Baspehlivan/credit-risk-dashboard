@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Verify the HF Space app is accessible."""
-import urllib.request, json
+import urllib.request
 
 # First, let's check the actual domain
 domains = [

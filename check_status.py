@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Check HF Space build status."""
-import json, subprocess, time
+import json
+import subprocess
+import time
 
 result = subprocess.run(
     ["hf", "spaces", "info", "wiebuch/credit-risk-dashboard"],

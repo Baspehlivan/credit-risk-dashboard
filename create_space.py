@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Create HF Space for Baspehlivan namespace."""
-import urllib.request, urllib.error
 import json
 import os
+import urllib.error
+import urllib.request
 
 token = os.environ.get("HF_TOKEN", "")
 url = "https://huggingface.co/api/repos/create"

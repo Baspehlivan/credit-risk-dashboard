@@ -18,23 +18,17 @@ import pandas as pd
 warnings.filterwarnings("ignore")
 
 # ---- Modelling ----
+import joblib
+import statsmodels.api as sm
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import (
-    RocCurveDisplay,
-    PrecisionRecallDisplay,
-    ConfusionMatrixDisplay,
     accuracy_score,
+    f1_score,
     precision_score,
     recall_score,
-    f1_score,
     roc_auc_score,
-    classification_report,
 )
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
-import statsmodels.api as sm
-import statsmodels.formula.api as smf
-import joblib
+from sklearn.model_selection import StratifiedKFold, cross_validate, train_test_split
 
 PROCESSED_DIR = Path(__file__).resolve().parent.parent / "data" / "processed"
 MODELS_DIR = Path(__file__).resolve().parent.parent / "models"
@@ -259,6 +253,78 @@ def train_random_forest(
         "metrics": metrics,
         "feature_importance": importance,
         "type": "random_forest",
+    }
+
+
+def cross_validate_models(
+    df: pd.DataFrame, n_splits: int = 5, seed: int = 42
+) -> dict:
+    """Run stratified k-fold cross-validation on both models.
+
+    Returns a dict with mean +/- std for each metric, suitable for reporting.
+    """
+    print("=" * 60)
+    print(f"Cross-Validation ({n_splits}-Fold Stratified)")
+    print("=" * 60)
+
+    X = _prepare_data(df)
+    y = df["default"].values
+    cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=seed)
+
+    # ---- Random Forest CV (sklearn-compatible, straightforward) ----
+    print("\n--- Random Forest CV ---")
+    rf = RandomForestClassifier(
+        n_estimators=300,
+        max_depth=10,
+        min_samples_leaf=20,
+        random_state=seed,
+        n_jobs=-1,
+        class_weight="balanced",
+    )
+    scoring = ["accuracy", "precision", "recall", "f1", "roc_auc"]
+    rf_cv = cross_validate(
+        rf, X, y, cv=cv, scoring=scoring, return_train_score=False
+    )
+    rf_results = {}
+    for metric in scoring:
+        key = f"test_{metric}"
+        vals = rf_cv[key]
+        rf_results[metric] = {"mean": vals.mean(), "std": vals.std()}
+        print(f"  {metric:15s}: {vals.mean():.4f} (+/- {vals.std():.4f})")
+
+    # ---- Logistic Regression CV (statsmodels, manual loop) ----
+    print("\n--- Logistic Regression CV ---")
+    logit_results = {m: [] for m in scoring}
+
+    for fold_idx, (train_idx, test_idx) in enumerate(cv.split(X, y)):
+        X_train = sm.add_constant(X.iloc[train_idx].astype(float))
+        X_test = sm.add_constant(X.iloc[test_idx].astype(float))
+        y_train, y_test = y[train_idx], y[test_idx]
+
+        model = sm.Logit(y_train, X_train)
+        result = model.fit(disp=False, maxiter=1000)
+
+        y_prob = result.predict(X_test)
+        y_pred = (y_prob >= 0.5).astype(int)
+
+        logit_results["accuracy"].append(accuracy_score(y_test, y_pred))
+        logit_results["precision"].append(precision_score(y_test, y_pred, zero_division=0))
+        logit_results["recall"].append(recall_score(y_test, y_pred, zero_division=0))
+        logit_results["f1"].append(f1_score(y_test, y_pred, zero_division=0))
+        logit_results["roc_auc"].append(roc_auc_score(y_test, y_prob))
+
+        print(f"  Fold {fold_idx + 1}: AUC={logit_results['roc_auc'][-1]:.4f}")
+
+    logit_summary = {}
+    for metric in scoring:
+        vals = np.array(logit_results[metric])
+        logit_summary[metric] = {"mean": vals.mean(), "std": vals.std()}
+        print(f"  {metric:15s}: {vals.mean():.4f} (+/- {vals.std():.4f})")
+
+    return {
+        "logistic": logit_summary,
+        "random_forest": rf_results,
+        "n_splits": n_splits,
     }
 
 
