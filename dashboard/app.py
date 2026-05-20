@@ -465,7 +465,7 @@ with st.sidebar:
         "project at a German university."
     )
     st.markdown("**Contact**")
-    st.markdown("[GitHub Profile](https://github.com/pehlivan-dagli)")
+    st.markdown("[GitHub Profile](https://github.com/Baspehlivan)")
     st.markdown("---")
     st.markdown(f"**Dataset stats**")
     st.markdown(f"- Applicants: {len(df):,}")
