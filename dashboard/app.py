@@ -237,9 +237,19 @@ with res_col3:
     )
 with res_col4:
     contrib = logit["model"].params.drop("const") * X_app_sm.values[0][1:]
-    top_feat = contrib.abs().idxmax()
+    top3 = contrib.abs().sort_values(ascending=False).head(3).index.tolist()
+    readable = {
+        "log_income": "Income (log)",
+        "log_loan_amount": "Loan (log)",
+        "loan_to_income": "Loan/Income",
+        "age": "Age",
+        "dti_ratio": "DTI Ratio",
+        "credit_history_years": "Credit History",
+        "past_defaults": "Past Defaults",
+    }
+    top3_readable = [readable.get(f, f) or f for f in top3]
     st.markdown(
-        f'<div class="stat-box"><div class="stat-value" style="font-size:1.0rem;">{top_feat}</div><div class="stat-label">Top Driver</div></div>',
+        f'<div class="stat-box"><div style="font-size:0.9rem;line-height:1.5;">{"<br>".join(top3_readable)}</div><div class="stat-label">Top Drivers</div></div>',
         unsafe_allow_html=True,
     )
 
